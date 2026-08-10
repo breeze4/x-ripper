@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# smoke-test — rip the canonical live X fixtures and assert extraction still works.
+# Drives a logged-out browser via agent-browser, restores the logged-in DOM
+# markers with decorate.js, and runs each scenario from tools/scenarios.json.
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCENARIOS_FILE="$ROOT/tools/scenarios.json"
+ASSERT="$ROOT/tools/browser/assert.js"
+SESSION="x-ripper-smoke"
+
+usage() {
+  cat <<'EOF'
+smoke-test — rip the canonical live X fixtures and assert the extraction still works
+Usage: tools/smoke-test [scenario ...]
+  With no arguments, runs every scenario in tools/scenarios.json.
+  Scenario kinds: "thread" runs the sweep harness directly; "post" runs the
+  full message path through a shimmed chrome.runtime listener.
+Example: tools/smoke-test thread-long
+Notes: needs the agent-browser CLI and node. Fixtures are live x.com URLs
+(logged out), so a deleted fixture post fails loudly — update scenarios.json.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+command -v agent-browser >/dev/null 2>&1 || { echo "smoke-test: agent-browser CLI not found" >&2; exit 1; }
+command -v node >/dev/null 2>&1 || { echo "smoke-test: node not found" >&2; exit 1; }
+
+ab() {
+  agent-browser --session "$SESSION" "$@"
+}
+
+TMP="$(mktemp -d)"
+cleanup() {
+  rm -rf "$TMP"
+  agent-browser --session "$SESSION" close >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+ALL_SCENARIOS="$(node "$ASSERT" list "$SCENARIOS_FILE")"
+
+if [ "$#" -eq 0 ]; then
+  set -- $ALL_SCENARIOS
+fi
+
+for name in "$@"; do
+  if ! printf '%s\n' "$ALL_SCENARIOS" | grep -qx "$name"; then
+    echo "smoke-test: unknown scenario '$name' (known: $(printf '%s' "$ALL_SCENARIOS" | tr '\n' ' '))" >&2
+    usage >&2
+    exit 2
+  fi
+done
+
+# The thread harness needs content.js with its internals exposed on window.
+perl -pe 's/__XRipperContentLoaded/__XRipperTestLoaded/g; s/^\}\)\(\);$/  window.__xrtest = { extractThreadMarkdown, getTweetArticles, getAuthorHandle, getPublishedTime, getTweetStatusId };\n})();/' \
+  "$ROOT/src/content.js" > "$TMP/content-exposed.js"
+
+if ! grep -q "__xrtest" "$TMP/content-exposed.js"; then
+  echo "smoke-test: could not expose content.js internals (IIFE closing line changed?)" >&2
+  exit 1
+fi
+
+agent-browser dashboard start >/dev/null 2>&1 || true
+
+FAILED=0
+
+for name in "$@"; do
+  url="$(node "$ASSERT" get "$SCENARIOS_FILE" "$name" url)"
+  kind="$(node "$ASSERT" get "$SCENARIOS_FILE" "$name" kind)"
+  echo "== $name ($kind): $url"
+
+  ab open "$url" >/dev/null
+  ab eval "new Promise((resolve) => setTimeout(() => resolve('settled'), 1500))" >/dev/null
+  ab eval "$(cat "$ROOT/tools/browser/shim.js")" >/dev/null
+  ab eval "$(cat "$ROOT/tools/browser/decorate.js")" >/dev/null
+
+  if [ "$kind" = "thread" ]; then
+    ab eval "$(cat "$TMP/content-exposed.js")" >/dev/null
+    ab eval "$(cat "$ROOT/tools/browser/sweep-test.js")" > "$TMP/$name.json"
+  else
+    ab eval "$(cat "$ROOT/src/content.js")" >/dev/null
+    ab eval "$(cat "$ROOT/tools/browser/fire.js")" > "$TMP/$name.json"
+  fi
+
+  if ! node "$ASSERT" check "$SCENARIOS_FILE" "$name" "$TMP/$name.json"; then
+    FAILED=1
+  fi
+done
+
+if [ "$FAILED" -ne 0 ]; then
+  echo "smoke-test: FAILED"
+  exit 1
+fi
+
+echo "smoke-test: all scenarios passed"

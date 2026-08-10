@@ -20,6 +20,10 @@ The export includes page metadata, readable text, and Markdown image embeds for 
 
 For same-author threads, the extension sweeps the conversation instead of reading the page once. Each pass clicks the safe "Show more" controls above the reply section (truncated long posts and thread-continuation cells), waits for X to finish loading, captures the author's posts that are currently rendered, and scrolls down to render more. It repeats until it reaches the first reply from a different author, then sorts the captured posts by timestamp and restores your scroll position. This per-pass capture is necessary because X unmounts off-screen posts, so a single read at the end can miss the tail of a long thread. It never clicks real links, so it cannot navigate away from the page. The popup reports how many controls it expanded.
 
+## Develop
+
+Run `tools/smoke-test` after changing `src/content.js`. It rips one canonical live fixture per artifact kind (long thread, thread with media, article, single post — see `tools/scenarios.json`) in a logged-out browser and asserts the extraction still works. The pre-commit hook runs it on every commit; bypass with `SKIP_SMOKE=1` if you must. If hooks are not firing, run `git config core.hooksPath tools/githooks` once.
+
 ## Current limits
 
 - X changes its DOM often, so extraction is intentionally selector-light and may need tuning for specific layouts.

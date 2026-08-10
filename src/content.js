@@ -46,6 +46,9 @@
     return result;
   }
 
+  // Single-pass expansion for the non-thread fallback path only. Thread rips
+  // go through extractThreadMarkdown, whose sweep has its own expansion loop
+  // with boundary filtering and network-quiet waits.
   async function expandShowMoreLinks() {
     const deadline = Date.now() + 20000;
     const alreadyClicked = new WeakSet();
@@ -315,14 +318,15 @@
 
     const title = getDocumentTitle(entries);
     const markdown = buildMarkdown(title, entries);
+    const images = uniqueImages(entries.flatMap((entry) => entry.images));
 
     return {
       filename: `${slugify(title || "x-export")}.md`,
       markdown,
-      images: uniqueImages(entries.flatMap((entry) => entry.images)),
+      images,
       stats: {
         blockCount: entries.reduce((sum, entry) => sum + entry.blocks.length, 0),
-        imageCount: uniqueImages(entries.flatMap((entry) => entry.images)).length,
+        imageCount: images.length,
         entryCount: entries.length
       }
     };

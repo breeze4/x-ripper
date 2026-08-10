@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "X Ripper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Save X articles and threads as Markdown with embedded media links.",
   "action": {
     "default_title": "Save X as Markdown",

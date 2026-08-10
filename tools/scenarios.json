@@ -1,0 +1,31 @@
+{
+  "thread-long": {
+    "kind": "thread",
+    "url": "https://x.com/TechByArti/status/2086765167757721954",
+    "note": "20-script interview thread; canonical rip: biggest-weakness-thread.md",
+    "minEntries": 15,
+    "minExpanded": 8,
+    "minMarkdownChars": 5000
+  },
+  "thread-images": {
+    "kind": "thread",
+    "url": "https://x.com/Aiwithpoonam/status/2086616955872821731",
+    "note": "10-prompt thread with media; canonical rip: claude-run-my-life-prompts.md",
+    "minEntries": 8,
+    "minExpanded": 5,
+    "minMarkdownChars": 1500,
+    "minImages": 1
+  },
+  "article": {
+    "kind": "post",
+    "url": "https://x.com/philhchen/status/2072793818945167475",
+    "note": "longform article; canonical rip: career-advice-in-the-age-of-ai.md",
+    "minMarkdownChars": 2000
+  },
+  "single-post": {
+    "kind": "post",
+    "url": "https://x.com/satyanadella/status/2076323181154230284",
+    "note": "long single post; canonical rip: the-reverse-information-paradox.md",
+    "minMarkdownChars": 1500
+  }
+}

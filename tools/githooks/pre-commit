@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${SKIP_SMOKE:-}" = "1" ]; then
+  echo "pre-commit: SKIP_SMOKE=1 — skipping smoke test"
+  exit 0
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+echo "pre-commit: running tools/smoke-test (set SKIP_SMOKE=1 to skip)"
+"$ROOT/tools/smoke-test"
