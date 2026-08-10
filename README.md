@@ -18,7 +18,7 @@ Chrome extension for saving the current X article, post, or same-author thread a
 
 The export includes page metadata, readable text, and Markdown image embeds for visible X media. By default, the extension fetches visible X media and writes it into the Markdown as data URIs so the file is self-contained. If an image cannot be fetched, that image remains a normal Markdown image reference to the original X media URL.
 
-Before extraction, the extension expands collapsed content in the thread. It clicks each safe "Show more" control (truncated long posts and inline thread-continuation cells), waits for the new content, and repeats until no more controls appear or a 20-second limit is reached. It never clicks real links, so it cannot navigate away from the page. The popup reports how many controls it expanded.
+For same-author threads, the extension sweeps the conversation instead of reading the page once. Each pass clicks the safe "Show more" controls above the reply section (truncated long posts and thread-continuation cells), waits for X to finish loading, captures the author's posts that are currently rendered, and scrolls down to render more. It repeats until it reaches the first reply from a different author, then sorts the captured posts by timestamp and restores your scroll position. This per-pass capture is necessary because X unmounts off-screen posts, so a single read at the end can miss the tail of a long thread. It never clicks real links, so it cannot navigate away from the page. The popup reports how many controls it expanded.
 
 ## Current limits
 
@@ -26,4 +26,5 @@ Before extraction, the extension expands collapsed content in the thread. It cli
 - Videos are saved as visible thumbnail images only.
 - Large posts can produce large Markdown files when image data embedding is enabled.
 - "Show more" detection uses the `tweet-text-show-more-link` test id plus an exact "Show more" text match, so non-English X interface languages only get the test-id path.
-- Very long threads can still lose off-screen posts if X removes them from the DOM; the extension rips what is present after expansion.
+- The thread sweep scrolls the page while it works (it restores your position when done) and stops after 30 seconds on pathologically long threads.
+- Promoted posts are skipped by their visible "Ad" label, which is English-only.

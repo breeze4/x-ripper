@@ -11,18 +11,8 @@
     }
 
     (async () => {
-      let expandedCount = 0;
-
       try {
-        expandedCount = await expandShowMoreLinks();
-      } catch {
-        // Expansion is best-effort; extraction still runs on whatever is in the DOM.
-      }
-
-      try {
-        const result = extractMarkdown();
-        result.stats.expandedCount = expandedCount;
-        sendResponse({ ok: true, ...result });
+        sendResponse({ ok: true, ...(await ripPage()) });
       } catch (error) {
         sendResponse({ ok: false, error: error.message || String(error) });
       }
@@ -30,6 +20,31 @@
 
     return true;
   });
+
+  async function ripPage() {
+    const statusId = getStatusId(location.href);
+    const focalArticle = statusId ? getTweetArticles().find((article) => getTweetStatusId(article) === statusId) : null;
+
+    if (focalArticle && !isLongformRoot(focalArticle)) {
+      try {
+        return await extractThreadMarkdown(focalArticle);
+      } catch {
+        // Sweep failed; fall back to the single-pass extraction below.
+      }
+    }
+
+    let expandedCount = 0;
+
+    try {
+      expandedCount = await expandShowMoreLinks();
+    } catch {
+      // Expansion is best-effort; extraction still runs on whatever is in the DOM.
+    }
+
+    const result = extractMarkdown();
+    result.stats.expandedCount = expandedCount;
+    return result;
+  }
 
   async function expandShowMoreLinks() {
     const deadline = Date.now() + 20000;
@@ -103,6 +118,186 @@
 
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // Rips a same-author thread by sweeping down the conversation: expand, harvest
+  // what is rendered, scroll, repeat. Harvesting each round is required because
+  // X virtualizes the timeline and unmounts off-screen posts.
+  async function extractThreadMarkdown(focalArticle) {
+    const focalStatusId = getStatusId(location.href);
+    const threadHandle = getAuthorHandle(focalArticle);
+
+    if (!threadHandle) {
+      throw new Error("Could not identify the thread author.");
+    }
+
+    const focalPublished = getPublishedTime(focalArticle) || "";
+    const harvest = new Map();
+    const alreadyClicked = new WeakSet();
+    const deadline = Date.now() + 30000;
+    const originalScrollY = window.scrollY;
+    let expandedCount = 0;
+    let seenCounter = 0;
+    let stagnantRounds = 0;
+
+    function threadArticleWalk() {
+      const articles = getTweetArticles();
+      const startIndex = articles.findIndex((article) => getTweetStatusId(article) === focalStatusId);
+      return articles.slice(Math.max(startIndex, 0));
+    }
+
+    function findBoundaryArticle() {
+      for (const article of threadArticleWalk()) {
+        if (isPromotedArticle(article)) {
+          continue;
+        }
+
+        const handle = getAuthorHandle(article);
+
+        if (handle && handle !== threadHandle) {
+          return article;
+        }
+      }
+
+      return null;
+    }
+
+    function findPendingExpanders() {
+      const boundary = findBoundaryArticle();
+
+      return findShowMoreExpanders()
+        .filter((element) => !alreadyClicked.has(element))
+        .filter((element) => !boundary || isBeforeInDocument(element, boundary));
+    }
+
+    function harvestRound() {
+      for (const article of threadArticleWalk()) {
+        if (isPromotedArticle(article)) {
+          continue;
+        }
+
+        const handle = getAuthorHandle(article);
+
+        if (handle && handle !== threadHandle) {
+          break;
+        }
+
+        if (!handle || !article.querySelector('[data-testid="tweetText"], [data-testid="tweetPhoto"], img[src]')) {
+          continue;
+        }
+
+        const published = getPublishedTime(article) || "";
+
+        if (focalPublished && published && published < focalPublished) {
+          continue;
+        }
+
+        const key = getTweetStatusId(article) || `${published}|${compactWhitespace(article.innerText).slice(0, 80)}`;
+
+        if (harvest.has(key)) {
+          continue;
+        }
+
+        const entry = extractEntry(article, 0);
+
+        if (!entry.blocks.length && !entry.images.length) {
+          continue;
+        }
+
+        entry.sortPublished = published;
+        entry.sortSeen = seenCounter += 1;
+        harvest.set(key, entry);
+      }
+    }
+
+    try {
+      for (let round = 0; round < 40 && Date.now() < deadline && stagnantRounds < 3; round += 1) {
+        const sizeBefore = harvest.size;
+        const expanders = findPendingExpanders();
+
+        if (expanders.length) {
+          for (const element of expanders) {
+            alreadyClicked.add(element);
+            element.click();
+          }
+
+          expandedCount += expanders.length;
+          await waitForExpanders(expanders, deadline);
+          await waitForQuiet(deadline);
+        }
+
+        harvestRound();
+
+        if (findBoundaryArticle() && !findPendingExpanders().length && !isTimelineLoading()) {
+          break;
+        }
+
+        stagnantRounds = harvest.size > sizeBefore || expanders.length ? 0 : stagnantRounds + 1;
+        window.scrollBy(0, window.innerHeight * 2);
+        await sleep(350);
+      }
+    } catch {
+      // Keep whatever was harvested before the sweep failed.
+    } finally {
+      window.scrollTo(0, originalScrollY);
+    }
+
+    const entries = Array.from(harvest.values()).sort((a, b) => {
+      const keyA = a.sortPublished || "\uffff";
+      const keyB = b.sortPublished || "\uffff";
+
+      if (keyA !== keyB) {
+        return keyA < keyB ? -1 : 1;
+      }
+
+      return a.sortSeen - b.sortSeen;
+    });
+
+    if (!entries.length) {
+      throw new Error("The thread sweep did not capture any posts.");
+    }
+
+    entries.forEach((entry, index) => {
+      entry.index = index + 1;
+    });
+
+    const title = getDocumentTitle(entries);
+    const allImages = uniqueImages(entries.flatMap((entry) => entry.images));
+
+    return {
+      filename: `${slugify(title || "x-export")}.md`,
+      markdown: buildMarkdown(title, entries),
+      images: allImages,
+      stats: {
+        blockCount: entries.reduce((sum, entry) => sum + entry.blocks.length, 0),
+        imageCount: allImages.length,
+        entryCount: entries.length,
+        expandedCount
+      }
+    };
+  }
+
+  function isPromotedArticle(article) {
+    return normalizedLines(article.innerText).some((line) => line === "Ad" || line === "Promoted");
+  }
+
+  function isBeforeInDocument(elementA, elementB) {
+    return Boolean(elementA.compareDocumentPosition(elementB) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }
+
+  function isTimelineLoading() {
+    const scope = document.querySelector('[data-testid="primaryColumn"]') || document.querySelector("main") || document;
+    return Array.from(scope.querySelectorAll('[role="progressbar"]')).some(isVisible);
+  }
+
+  async function waitForQuiet(deadline) {
+    const quietBy = Math.min(Date.now() + 4000, deadline);
+
+    while (Date.now() < quietBy && isTimelineLoading()) {
+      await sleep(150);
+    }
+
+    await sleep(250);
   }
 
   function extractMarkdown() {
