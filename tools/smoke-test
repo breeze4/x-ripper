@@ -50,7 +50,10 @@ trap cleanup EXIT
 ALL_SCENARIOS="$(node "$ASSERT" list "$SCENARIOS_FILE")"
 
 if [ "$#" -eq 0 ]; then
-  set -- $ALL_SCENARIOS
+  # macOS hooks run bash 3.2 — no mapfile; build "$@" line by line instead.
+  while IFS= read -r scenario_name; do
+    [ -n "$scenario_name" ] && set -- "$@" "$scenario_name"
+  done <<< "$ALL_SCENARIOS"
 fi
 
 for name in "$@"; do
