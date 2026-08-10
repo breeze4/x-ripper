@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>X Ripper</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header class="header">
+        <h1>X Ripper</h1>
+        <p>Save the current X article or thread as Markdown.</p>
+      </header>
+
+      <button id="save" class="primary-button" type="button">
+        Save Markdown
+      </button>
+
+      <label class="checkbox-row">
+        <input id="embed-images" type="checkbox" checked>
+        <span>Embed image data</span>
+      </label>
+
+      <section id="status" class="status" role="status" aria-live="polite">
+        Open an X article or status page, then click Save Markdown.
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
