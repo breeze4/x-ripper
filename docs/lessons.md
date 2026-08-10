@@ -22,3 +22,4 @@ Fixture URLs mined from the frontmatter `source:` lines of already-ripped inbox 
 Context: feature session — expand "Show more" pseudo links before ripping a thread
 Logged-out x.com serves a different bundle with all `data-testid` attributes stripped, so the extension's primary selectors cannot be exercised without a login. Logged-in verification had to rely on third-party scraper source code instead of direct inspection.
 Proposed fix: log in to x.com once in agent-browser and `agent-browser state save x-auth.json` so future sessions can test the logged-in DOM.
+Ingested: 2026-08-10 — resolved directly: `~/.agent-browser/x-auth.json` saved (cookies hand-carried from the user's normal browser after X's login flow blocked the automated one); `tools/smoke-test` consumes it via `XR_AUTH_STATE`.

@@ -14,7 +14,7 @@ Before re-deriving a multi-step command, scan the table for an existing tool and
 
 | Tool | What it does | Example |
 |---|---|---|
-| `tools/smoke-test` | Rips the canonical live X fixtures in `tools/scenarios.json` (threads, article, single post) and asserts extraction still works; run by the pre-commit hook | `tools/smoke-test thread-long` |
+| `tools/smoke-test` | Rips the canonical live X fixtures in `tools/scenarios.json` (threads, article, single post) and asserts extraction still works; run by the pre-commit hook. `XR_AUTH_STATE=~/.agent-browser/x-auth.json` runs it against the real logged-in DOM (on demand only) | `tools/smoke-test thread-long` |
 
 ## Internals
 

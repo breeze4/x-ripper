@@ -19,7 +19,10 @@ Usage: tools/smoke-test [scenario ...]
   full message path through a shimmed chrome.runtime listener.
 Example: tools/smoke-test thread-long
 Notes: needs the agent-browser CLI and node. Fixtures are live x.com URLs
-(logged out), so a deleted fixture post fails loudly — update scenarios.json.
+(logged out by default), so a deleted fixture post fails loudly — update
+scenarios.json. Set XR_AUTH_STATE=/path/to/state.json to run against the
+real logged-in DOM (e.g. ~/.agent-browser/x-auth.json) — use on demand,
+not as the default, since it browses with the real account.
 EOF
 }
 
@@ -68,6 +71,13 @@ if ! grep -q "__xrtest" "$TMP/content-exposed.js"; then
 fi
 
 agent-browser dashboard start >/dev/null 2>&1 || true
+
+if [ -n "${XR_AUTH_STATE:-}" ]; then
+  [ -f "$XR_AUTH_STATE" ] || { echo "smoke-test: XR_AUTH_STATE file not found: $XR_AUTH_STATE" >&2; exit 1; }
+  echo "== using logged-in auth state: $XR_AUTH_STATE"
+  ab open >/dev/null
+  ab state load "$XR_AUTH_STATE" >/dev/null
+fi
 
 FAILED=0
 
