@@ -6,7 +6,8 @@
       addListener: (fn) => {
         window.__xrShim.listener = fn;
       }
-    }
+    },
+    sendMessage: () => {}
   };
   return "shim ready";
 })()

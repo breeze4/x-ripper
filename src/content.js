@@ -5,6 +5,28 @@
 
   window.__XRipperContentLoaded = true;
 
+  const captureStore = new Map();
+
+  window.addEventListener("message", (event) => {
+    try {
+      if (event.source !== window || event.origin !== location.origin) {
+        return;
+      }
+
+      if (event.data?.type === "XRIPPER_GQL" && typeof event.data.body === "string") {
+        ingestGqlBody(event.data.body);
+      }
+    } catch {
+      // Never let a malformed message break the content script.
+    }
+  });
+
+  try {
+    window.postMessage({ type: "XRIPPER_GQL_REPLAY_REQUEST" }, location.origin);
+  } catch {
+    // The interceptor may not be present (e.g. this harness); DOM fallback covers it.
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type !== "XRIPPER_EXTRACT_MARKDOWN") {
       return false;
@@ -20,6 +42,316 @@
 
     return true;
   });
+
+  // Capture store: normalizes X's own GraphQL responses (relayed by
+  // src/interceptor.js) into posts keyed by status ID, so the sweep can
+  // prefer untruncated, structured data over the rendered DOM.
+  function ingestGqlBody(bodyText) {
+    let payload;
+
+    try {
+      payload = JSON.parse(bodyText);
+    } catch {
+      return;
+    }
+
+    const found = [];
+
+    try {
+      walkForTweetResults(payload, found);
+    } catch {
+      return;
+    }
+
+    for (const tweetResult of found) {
+      try {
+        const record = normalizeTweetResult(tweetResult, 0);
+
+        if (record?.statusId) {
+          captureStore.set(record.statusId, record);
+        }
+      } catch {
+        // Skip malformed tweet results; the DOM fallback still covers them.
+      }
+    }
+  }
+
+  // Any object anywhere in the response tree with a string rest_id and a
+  // legacy object exposing full_text is a tweet result, whatever operation or
+  // nesting produced it. This is stable across X schema/operation renames.
+  function walkForTweetResults(node, out) {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        walkForTweetResults(item, out);
+      }
+      return;
+    }
+
+    const candidate = unwrapTweetVisibility(node);
+
+    if (isTweetResult(candidate)) {
+      out.push(candidate);
+    }
+
+    for (const key of Object.keys(node)) {
+      walkForTweetResults(node[key], out);
+    }
+  }
+
+  function unwrapTweetVisibility(node) {
+    if (node?.__typename === "TweetWithVisibilityResults" && node.tweet && typeof node.tweet === "object") {
+      return node.tweet;
+    }
+
+    return node;
+  }
+
+  function isTweetResult(node) {
+    return Boolean(node) && typeof node.rest_id === "string" && node.legacy && typeof node.legacy === "object" && node.legacy.full_text !== undefined;
+  }
+
+  // depth 0 is a top-level capture; depth 1 is a quoted post, which never
+  // carries its own quoted post (one level of nesting only).
+  function normalizeTweetResult(tweetResult, depth) {
+    if (!tweetResult || typeof tweetResult !== "object") {
+      return null;
+    }
+
+    const statusId = String(tweetResult.rest_id || "");
+    const legacy = tweetResult.legacy || {};
+    const user = tweetResult.core?.user_results?.result || null;
+    const screenName = user?.core?.screen_name || user?.legacy?.screen_name || "";
+    const authorName = user?.core?.name || user?.legacy?.name || "";
+    const record = {
+      statusId,
+      handle: screenName ? `@${screenName}` : "",
+      author: authorName,
+      published: normalizeCreatedAt(legacy.created_at),
+      conversationId: legacy.conversation_id_str || "",
+      text: extractTweetText(tweetResult, legacy),
+      media: extractMedia(legacy),
+      quoted: null,
+      sourceUrl: screenName && statusId ? `https://x.com/${screenName}/status/${statusId}` : ""
+    };
+
+    const quotedResult = depth === 0 ? tweetResult.quoted_status_result?.result : null;
+
+    if (quotedResult) {
+      record.quoted = normalizeTweetResult(unwrapTweetVisibility(quotedResult), 1);
+    }
+
+    return record;
+  }
+
+  function normalizeCreatedAt(createdAt) {
+    try {
+      return new Date(createdAt).toISOString();
+    } catch {
+      return "";
+    }
+  }
+
+  function extractTweetText(tweetResult, legacy) {
+    const noteResult = tweetResult.note_tweet?.note_tweet_results?.result;
+    let text = typeof noteResult?.text === "string" ? noteResult.text : legacy.full_text || "";
+
+    const urlEntities = [...(noteResult?.entity_set?.urls || []), ...(legacy.entities?.urls || [])];
+
+    for (const entity of urlEntities) {
+      if (entity?.url && entity.expanded_url) {
+        text = text.split(entity.url).join(entity.expanded_url);
+      }
+    }
+
+    // Media t.co links live in entities.media (not entities.urls), so the
+    // expansion above never rewrites them; drop them since media renders
+    // as explicit blocks/images instead.
+    for (const mediaItem of legacy.extended_entities?.media || []) {
+      if (mediaItem?.url) {
+        text = text.split(mediaItem.url).join("");
+      }
+    }
+
+    // The quote permalink can survive as either the raw t.co or, after the
+    // entity expansion above, its expanded form — strip whichever trails.
+    for (const permalinkUrl of [tweetResult.quoted_status_permalink?.url, tweetResult.quoted_status_permalink?.expanded]) {
+      if (permalinkUrl && text.trim().endsWith(permalinkUrl)) {
+        text = text.trim().slice(0, text.trim().length - permalinkUrl.length);
+      }
+    }
+
+    return text.trim();
+  }
+
+  function extractMedia(legacy) {
+    const items = legacy.extended_entities?.media || [];
+    const media = [];
+
+    for (const item of items) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+
+      if (item.type === "photo") {
+        media.push({
+          kind: "photo",
+          src: normalizeImageUrl(item.media_url_https || ""),
+          alt: item.ext_alt_text || ""
+        });
+        continue;
+      }
+
+      if (item.type === "video" || item.type === "animated_gif") {
+        media.push({
+          kind: "video",
+          postUrl: item.expanded_url || "",
+          mp4: highestBitrateMp4(item.video_info),
+          thumb: item.media_url_https || "",
+          durationMs: item.video_info?.duration_millis
+        });
+      }
+    }
+
+    return media;
+  }
+
+  function highestBitrateMp4(videoInfo) {
+    const variants = videoInfo?.variants || [];
+    let best = null;
+
+    for (const variant of variants) {
+      if (variant?.content_type !== "video/mp4") {
+        continue;
+      }
+
+      if (!best || (variant.bitrate || 0) > (best.bitrate || 0)) {
+        best = variant;
+      }
+    }
+
+    return best?.url || "";
+  }
+
+  // Converts a capture-store record into the same entry shape extractEntry
+  // produces from the DOM, so the rest of the pipeline (sort, buildMarkdown,
+  // stats) treats graphql- and dom-sourced entries identically.
+  function buildEntryFromRecord(record, index) {
+    const blocks = splitIntoBlocks(record.text);
+
+    if (record.quoted) {
+      blocks.push(buildQuotedBlock(record.quoted));
+    }
+
+    const images = [];
+    let videoCount = 0;
+
+    for (const media of record.media) {
+      if (media.kind === "photo") {
+        images.push({ alt: media.alt || "", src: media.src });
+        continue;
+      }
+
+      if (media.kind === "video") {
+        blocks.push(buildVideoBlock(media));
+        images.push({ alt: "Video thumbnail", src: media.thumb });
+        videoCount += 1;
+      }
+    }
+
+    return {
+      index,
+      author: record.author,
+      handle: record.handle,
+      published: record.published,
+      sourceUrl: record.sourceUrl,
+      isLongform: false,
+      blocks,
+      images: uniqueImages(images),
+      source: "graphql",
+      quoted: Boolean(record.quoted),
+      videoCount
+    };
+  }
+
+  function splitIntoBlocks(text) {
+    return String(text || "")
+      .split(/\n{2,}/)
+      .map((block) => block.trim())
+      .filter(Boolean);
+  }
+
+  function buildQuotedBlock(quotedRecord) {
+    const author = [quotedRecord.author, quotedRecord.handle].filter(Boolean).join(" ");
+    const intro = ["Quoted post", author, quotedRecord.sourceUrl].filter(Boolean).join(" - ");
+    const quotedLines = String(quotedRecord.text || "")
+      .split(/\n+/)
+      .map((line) => `> ${line}`)
+      .join("\n");
+    const photoLines = quotedRecord.media
+      .filter((media) => media.kind === "photo")
+      .map((media) => `> ![${escapeAlt(media.alt)}](${media.src})`)
+      .join("\n");
+
+    return [intro ? `${intro}:` : "Quoted post:", quotedLines, photoLines].filter(Boolean).join("\n");
+  }
+
+  function buildVideoBlock(media) {
+    let line = `Video (${formatDuration(media.durationMs)}): [${media.postUrl}](${media.postUrl})`;
+
+    if (media.mp4) {
+      line += ` — [MP4](${media.mp4})`;
+    }
+
+    return [line, `![Video thumbnail](${media.thumb})`].join("\n");
+  }
+
+  function formatDuration(durationMs) {
+    const totalSeconds = Math.max(0, Math.round(Number(durationMs || 0) / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  function computeCaptureStats(entries) {
+    const sourceCounts = { graphql: 0, dom: 0 };
+    let quotedCount = 0;
+    let videoCount = 0;
+
+    for (const entry of entries) {
+      sourceCounts[entry.source === "graphql" ? "graphql" : "dom"] += 1;
+
+      if (entry.quoted) {
+        quotedCount += 1;
+      }
+
+      videoCount += entry.videoCount || 0;
+    }
+
+    const captureSource = sourceCounts.graphql > entries.length / 2 ? "graphql" : "dom";
+
+    return { captureSource, sourceCounts, quotedCount, videoCount };
+  }
+
+  function sendProgress(captured) {
+    try {
+      if (typeof chrome === "undefined" || !chrome.runtime || typeof chrome.runtime.sendMessage !== "function") {
+        return;
+      }
+
+      const result = chrome.runtime.sendMessage({ type: "XRIPPER_PROGRESS", captured });
+
+      if (result && typeof result.catch === "function") {
+        result.catch(() => {});
+      }
+    } catch {
+      // Fire-and-forget: a closed popup, the test shim, or an invalidated
+      // extension context all make delivery impossible and must not fail the rip.
+    }
+  }
 
   async function ripPage() {
     const statusId = getStatusId(location.href);
@@ -89,6 +421,24 @@
     }
 
     return Array.from(candidates).filter(isSafeExpander);
+  }
+
+  // Thread-continuation cursors: long same-author threads (40+ posts) render
+  // only the first ~31 posts, gating the rest behind a "Show replies" button.
+  // Sweep-only — the non-thread fallback (expandShowMoreLinks) must not use
+  // this, since the same label also appears on reply-section cursors after
+  // the thread boundary, which findPendingExpanders' boundary filter excludes.
+  function findShowRepliesExpanders() {
+    const scope = document.querySelector('[data-testid="primaryColumn"]') || document.querySelector("main") || document;
+    const candidates = [];
+
+    for (const button of scope.querySelectorAll("button, [role='button']")) {
+      if (/^show replies$/i.test(compactWhitespace(button.innerText))) {
+        candidates.push(button);
+      }
+    }
+
+    return candidates.filter(isSafeExpander);
   }
 
   function isSafeExpander(element) {
@@ -167,8 +517,9 @@
 
     function findPendingExpanders() {
       const boundary = findBoundaryArticle();
+      const candidates = new Set([...findShowMoreExpanders(), ...findShowRepliesExpanders()]);
 
-      return findShowMoreExpanders()
+      return Array.from(candidates)
         .filter((element) => !alreadyClicked.has(element))
         .filter((element) => !boundary || isBeforeInDocument(element, boundary));
     }
@@ -195,19 +546,21 @@
           continue;
         }
 
-        const key = getTweetStatusId(article) || `${published}|${compactWhitespace(article.innerText).slice(0, 80)}`;
+        const statusId = getTweetStatusId(article);
+        const key = statusId || `${published}|${compactWhitespace(article.innerText).slice(0, 80)}`;
 
         if (harvest.has(key)) {
           continue;
         }
 
-        const entry = extractEntry(article, 0);
+        const record = statusId ? captureStore.get(statusId) : null;
+        const entry = record ? buildEntryFromRecord(record, 0) : extractEntry(article, 0);
 
         if (!entry.blocks.length && !entry.images.length) {
           continue;
         }
 
-        entry.sortPublished = published;
+        entry.sortPublished = record?.published || published;
         entry.sortSeen = seenCounter += 1;
         harvest.set(key, entry);
       }
@@ -230,6 +583,7 @@
         }
 
         harvestRound();
+        sendProgress(harvest.size);
 
         if (findBoundaryArticle() && !findPendingExpanders().length && !isTimelineLoading()) {
           break;
@@ -243,6 +597,38 @@
       // Keep whatever was harvested before the sweep failed.
     } finally {
       window.scrollTo(0, originalScrollY);
+    }
+
+    // Recover posts virtualization unmounted before harvest: any store-only
+    // record from the same conversation and author, not earlier than the
+    // focal post, gets merged in even though it was never rendered.
+    const focalRecord = captureStore.get(focalStatusId) || null;
+    const expectedConversationId = focalRecord?.conversationId || focalStatusId;
+
+    if (expectedConversationId) {
+      for (const [statusId, record] of captureStore) {
+        if (harvest.has(statusId) || record.handle !== threadHandle) {
+          continue;
+        }
+
+        if ((record.conversationId || "") !== expectedConversationId) {
+          continue;
+        }
+
+        if (record.published < focalPublished) {
+          continue;
+        }
+
+        const entry = buildEntryFromRecord(record, 0);
+
+        if (!entry.blocks.length && !entry.images.length) {
+          continue;
+        }
+
+        entry.sortPublished = record.published || "";
+        entry.sortSeen = seenCounter += 1;
+        harvest.set(statusId, entry);
+      }
     }
 
     const entries = Array.from(harvest.values()).sort((a, b) => {
@@ -275,7 +661,8 @@
         blockCount: entries.reduce((sum, entry) => sum + entry.blocks.length, 0),
         imageCount: allImages.length,
         entryCount: entries.length,
-        expandedCount
+        expandedCount,
+        ...computeCaptureStats(entries)
       }
     };
   }
@@ -310,7 +697,7 @@
       throw new Error("No article or thread content was found on this page.");
     }
 
-    const entries = roots.map((root, index) => extractEntry(root, index + 1)).filter((entry) => entry.blocks.length || entry.images.length);
+    const entries = roots.map((root, index) => buildEntryForRoot(root, index + 1)).filter((entry) => entry.blocks.length || entry.images.length);
 
     if (!entries.length) {
       throw new Error("The page did not expose readable article text or media yet. Try again after it finishes loading.");
@@ -327,9 +714,30 @@
       stats: {
         blockCount: entries.reduce((sum, entry) => sum + entry.blocks.length, 0),
         imageCount: images.length,
-        entryCount: entries.length
+        entryCount: entries.length,
+        ...computeCaptureStats(entries)
       }
     };
+  }
+
+  // Longform Articles always stay DOM (their Draft.js structure is a fragile
+  // mapping the existing extractor already handles well). Everything else
+  // prefers the capture store when the root's status ID was captured.
+  function buildEntryForRoot(root, index) {
+    if (isLongformRoot(root)) {
+      return extractEntry(root, index);
+    }
+
+    const statusId = getTweetStatusId(root);
+    const record = statusId ? captureStore.get(statusId) : null;
+
+    if (record) {
+      const entry = buildEntryFromRecord(record, index);
+      entry.sourceUrl = entry.sourceUrl || getEntrySourceUrl(root) || location.href;
+      return entry;
+    }
+
+    return extractEntry(root, index);
   }
 
   function collectArticleRoots() {
@@ -414,7 +822,10 @@
       sourceUrl: getEntrySourceUrl(root) || location.href,
       isLongform: isLongformRoot(root),
       blocks: extractTextBlocks(root),
-      images: extractImages(root)
+      images: extractImages(root),
+      source: "dom",
+      quoted: false,
+      videoCount: 0
     };
   }
 

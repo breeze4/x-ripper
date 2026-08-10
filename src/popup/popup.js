@@ -6,6 +6,16 @@ saveButton.addEventListener("click", async () => {
   setStatus("Expanding truncated posts and reading the current X page...");
   saveButton.disabled = true;
 
+  const onProgress = (message) => {
+    if (message?.type === "XRIPPER_PROGRESS") {
+      setStatus(`Captured ${message.captured} post${plural(message.captured)}... sweeping the thread.`);
+    }
+  };
+
+  if (chrome.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener(onProgress);
+  }
+
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
@@ -39,6 +49,9 @@ saveButton.addEventListener("click", async () => {
   } catch (error) {
     setStatus(error.message || String(error), "error");
   } finally {
+    if (chrome.runtime?.onMessage) {
+      chrome.runtime.onMessage.removeListener(onProgress);
+    }
     saveButton.disabled = false;
   }
 });
@@ -146,7 +159,8 @@ function downloadMarkdown(filename, markdown) {
 
 function successMessage(stats, imageStats, triedEmbedding) {
   const expanded = stats.expandedCount ? ` Expanded ${stats.expandedCount} "Show more" link${plural(stats.expandedCount)}.` : "";
-  const base = `Saved ${stats.blockCount} text block${plural(stats.blockCount)} and ${stats.imageCount} image${plural(stats.imageCount)}.${expanded}`;
+  const source = stats.captureSource ? ` Source: ${stats.captureSource}.` : "";
+  const base = `Saved ${stats.blockCount} text block${plural(stats.blockCount)} and ${stats.imageCount} image${plural(stats.imageCount)}.${expanded}${source}`;
 
   if (!triedEmbedding || !stats.imageCount) {
     return base;

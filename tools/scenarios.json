@@ -5,7 +5,8 @@
     "note": "20-script interview thread; canonical rip: biggest-weakness-thread.md",
     "minEntries": 15,
     "minExpanded": 8,
-    "minMarkdownChars": 5000
+    "minMarkdownChars": 5000,
+    "loggedIn": { "captureSource": "graphql" }
   },
   "thread-images": {
     "kind": "thread",
@@ -14,18 +15,40 @@
     "minEntries": 8,
     "minExpanded": 5,
     "minMarkdownChars": 1500,
-    "minImages": 1
+    "minImages": 1,
+    "loggedIn": { "captureSource": "graphql" }
+  },
+  "thread-mega": {
+    "kind": "thread",
+    "url": "https://x.com/innercitypress/status/1773340043744010640",
+    "note": "SBF sentencing live thread; observed 2026-08-10: 82 entries both modes, 24.5-26.2k markdown chars, 2 Show-replies cursor clicks logged-in (0 logged-out: full run hydrates on scroll)",
+    "minEntries": 40,
+    "minExpanded": 0,
+    "minMarkdownChars": 12000,
+    "loggedIn": { "captureSource": "graphql", "minExpanded": 1 }
+  },
+  "thread-quote": {
+    "kind": "thread",
+    "url": "https://x.com/conspirator0/status/1020486739545280513",
+    "note": "trutherbot botnet thread with one self-quote-tweet; observed 2026-08-10: 7-8 entries, 11-13 images, 3.4-4.3k markdown chars, quotedCount 1 logged-in",
+    "minEntries": 5,
+    "minExpanded": 0,
+    "minMarkdownChars": 2500,
+    "minImages": 8,
+    "loggedIn": { "captureSource": "graphql", "minQuoted": 1 }
   },
   "article": {
     "kind": "post",
     "url": "https://x.com/philhchen/status/2072793818945167475",
-    "note": "longform article; canonical rip: career-advice-in-the-age-of-ai.md",
-    "minMarkdownChars": 2000
+    "note": "longform article; canonical rip: career-advice-in-the-age-of-ai.md; longform stays DOM-sourced by design even logged-in",
+    "minMarkdownChars": 2000,
+    "loggedIn": { "captureSource": "dom" }
   },
   "single-post": {
     "kind": "post",
     "url": "https://x.com/satyanadella/status/2076323181154230284",
-    "note": "long single post; canonical rip: the-reverse-information-paradox.md",
-    "minMarkdownChars": 1500
+    "note": "long single post (longform note, so DOM-sourced by design even logged-in); canonical rip: the-reverse-information-paradox.md",
+    "minMarkdownChars": 1500,
+    "loggedIn": { "captureSource": "dom" }
   }
 }

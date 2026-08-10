@@ -37,7 +37,7 @@ command -v agent-browser >/dev/null 2>&1 || { echo "smoke-test: agent-browser CL
 command -v node >/dev/null 2>&1 || { echo "smoke-test: node not found" >&2; exit 1; }
 
 ab() {
-  agent-browser --session "$SESSION" "$@"
+  agent-browser --session "$SESSION" --init-script "$ROOT/src/interceptor.js" "$@"
 }
 
 TMP="$(mktemp -d)"

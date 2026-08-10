@@ -1,0 +1,16 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax-check JS files
+        run: find src tools -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Shellcheck
+        run: shellcheck tools/smoke-test tools/githooks/*

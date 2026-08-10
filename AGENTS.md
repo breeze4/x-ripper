@@ -2,6 +2,10 @@
 
 Chrome extension (Manifest V3) that saves the current X article, post, or same-author thread as Markdown. Source lives in `src/`; there is no build step — load `src/` unpacked at `chrome://extensions`. `src/content.js` does all extraction; `src/popup/` is the UI.
 
+## Docs
+
+The docs router is `docs/README.md` — consult it before searching, and read a doc's `head -7` header to confirm relevance. When a change makes a router-listed doc stale, update that doc in the same unit of work and re-stamp its `Last-verified` date; new docs get the 7-line header and a router line.
+
 <!-- APPEND POINT: tools -->
 ## Tools
 

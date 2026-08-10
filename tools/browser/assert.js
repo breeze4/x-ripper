@@ -56,9 +56,30 @@ if (!extra) {
   usage(2);
 }
 
+// Logged-in runs (XR_AUTH_STATE set) deep-merge the scenario's optional
+// `loggedIn` object over the base fields before asserting — e.g. tighter
+// thresholds or an expected `captureSource`. Logged-out runs use the base
+// scenario untouched and never see a `captureSource` field to assert on.
+function deepMerge(base, override) {
+  const merged = { ...base };
+  for (const key of Object.keys(override)) {
+    const baseVal = base[key];
+    const overrideVal = override[key];
+    const bothPlainObjects =
+      baseVal && overrideVal && typeof baseVal === "object" && typeof overrideVal === "object" &&
+      !Array.isArray(baseVal) && !Array.isArray(overrideVal);
+    merged[key] = bothPlainObjects ? deepMerge(baseVal, overrideVal) : overrideVal;
+  }
+  return merged;
+}
+
+const loggedIn = Boolean(process.env.XR_AUTH_STATE);
+const effective = loggedIn && scenario.loggedIn ? deepMerge(scenario, scenario.loggedIn) : scenario;
+
 // agent-browser eval prints the evaluated value JSON-encoded, so the result
 // file holds a JSON string containing JSON.
 const result = JSON.parse(JSON.parse(fs.readFileSync(extra, "utf8").trim()));
+const stats = result.stats || {};
 const failures = [];
 const check = (label, condition) => {
   if (!condition) {
@@ -70,22 +91,33 @@ if (result.threw) {
   check(`harness threw: ${result.threw}`, false);
 }
 
-if (scenario.kind === "thread") {
-  const stats = result.stats || {};
-  check(`entries ${stats.entryCount} >= ${scenario.minEntries}`, stats.entryCount >= scenario.minEntries);
-  check(`expanded ${stats.expandedCount} >= ${scenario.minExpanded}`, stats.expandedCount >= scenario.minExpanded);
+if (effective.kind === "thread") {
+  check(`entries ${stats.entryCount} >= ${effective.minEntries}`, stats.entryCount >= effective.minEntries);
+  check(`expanded ${stats.expandedCount} >= ${effective.minExpanded}`, stats.expandedCount >= effective.minExpanded);
   check("scroll restored", result.scrollRestored === true);
 } else {
   check(`response ok (error: ${result.error})`, result.ok === true);
 }
 
-check(`markdown chars ${result.markdownChars} >= ${scenario.minMarkdownChars}`, result.markdownChars >= scenario.minMarkdownChars);
+check(`markdown chars ${result.markdownChars} >= ${effective.minMarkdownChars}`, result.markdownChars >= effective.minMarkdownChars);
 
-if (scenario.minImages) {
-  check(`images ${result.imageCount} >= ${scenario.minImages}`, result.imageCount >= scenario.minImages);
+if (effective.minImages) {
+  check(`images ${result.imageCount} >= ${effective.minImages}`, result.imageCount >= effective.minImages);
 }
 
 check("no Show more leak in markdown", result.hasShowMoreLeak !== true);
+
+if (effective.captureSource !== undefined) {
+  check(`captureSource ${stats.captureSource} == ${effective.captureSource}`, stats.captureSource === effective.captureSource);
+}
+
+if (effective.minQuoted !== undefined) {
+  check(`quoted ${stats.quotedCount} >= ${effective.minQuoted}`, stats.quotedCount >= effective.minQuoted);
+}
+
+if (effective.minVideos !== undefined) {
+  check(`videos ${stats.videoCount} >= ${effective.minVideos}`, stats.videoCount >= effective.minVideos);
+}
 
 console.log(`  result: ${JSON.stringify({ ...result.stats, imageCount: result.imageCount, markdownChars: result.markdownChars })}`);
 
