@@ -14,5 +14,8 @@ Before re-deriving a multi-step command, check `tools/README.md` for an existing
 Run `tools/smoke-test` after any change to `src/content.js` — it rips the canonical live fixtures in `tools/scenarios.json` and fails on extraction regressions. The pre-commit hook runs it automatically (`SKIP_SMOKE=1 git commit ...` to bypass in an emergency). If the hook does not fire, re-wire it with `git config core.hooksPath tools/githooks`.
 
 <!-- APPEND POINT: lessons -->
+## Lessons-derived rules
+
+- Verify x.com facts live before they land: any claim about X's DOM, GraphQL schema, or a fixture URL must be confirmed first-hand via agent-browser (logged-out and, when it matters, logged-in via `XR_AUTH_STATE`) before it enters `src/`, `tools/scenarios.json`, or a spec. Web-search results, scraper codebases, and AI-summarized pages are leads, not evidence — status IDs only count when read from a literal URL or live capture, and a fixture URL enters `scenarios.json` only after a live rip has produced the observed values its thresholds are set from.
 
 <!-- APPEND POINT: lint -->

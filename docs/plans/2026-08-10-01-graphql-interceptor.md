@@ -13,9 +13,9 @@ Status: current
 - [x] 3. Payoff rendering: `note_tweet` full text with t.co expansion, quoted posts as attributed blockquotes (permalink t.co stripped, media t.co links dropped), video as labeled post-URL + MP4 link + thumbnail; `quotedCount`/`videoCount` stats. Demonstrated live on a quote+video post (graphql source).
 - [x] 4. New fixtures: verified live in both modes — `thread-mega` (SBF sentencing live thread, 82 same-author posts; Foone candidates dead: protected account) and `thread-quote` (conspirator0, one self-quote) — thresholds set from observed values; `minQuoted` guards the blockquote payoff under `loggedIn`; post scenarios pin `captureSource: "dom"` (longform by design).
 - [x] 5. Popup live progress: harvest-round progress messages from `src/content.js`, "Captured N posts…" in `src/popup/popup.js`; user manually rips the mega-thread in Chrome and confirms the live count in chat. (Code done; user confirmation pending.)
-- [ ] 6. CI: `.github/workflows/ci.yml` running `node --check` on every `.js` under `src/` and `tools/`, plus `shellcheck` on `tools/smoke-test` and `tools/githooks/*`; push and confirm green via `gh run list`. (Workflow written; push + green run pending.)
+- [x] 6. CI: `.github/workflows/ci.yml` running `node --check` on every `.js` under `src/` and `tools/`, plus `shellcheck` on `tools/smoke-test` and `tools/githooks/*`; pushed and green (first run caught a real SC2086; fixed bash-3.2-safe for macOS hooks).
 - [x] 7. Docs router: `docs/README.md` per the project-docs conventions, one row per doc in `docs/` (spec, this plan, lessons); `tools/README.md` and root `README.md` updated where behavior changed.
-- [ ] 8. Lessons ingest: run the ingest-lessons pass over the un-stamped `docs/lessons.md` entries, apply what the user approves, stamp every backlog entry `Ingested:`; append this session's lessons.
+- [x] 8. Lessons ingest: user approved all three clusters; AGENTS.md gained the verify-x-facts-live rule; all 7 entries stamped `Ingested:`; this session's lessons appended.
 - [ ] 9. Final proof in conversation: logged-out smoke output, logged-in smoke output with `graphql` thread sources, `gh run list` green for the final commit, `git log --oneline` showing work pushed to origin/main, user's popup confirmation.
 
 ## Decisions already made
